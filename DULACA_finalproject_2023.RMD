@@ -1,5 +1,4 @@
 ---
-title: ANLYTC3 Finals Project
 author: Dulaca, Joanna Grace P.
 output: html_document
 ---
@@ -434,3 +433,4 @@ In this analysis, I explored factors influencing educational outcomes and langua
 • While non-multigrade classes tend to have slightly higher average test scores, there are individual cases where students in multigrade classes perform exceptionally well, and vice versa.
 •	There is a positive trend between IQ and language test scores across different class sizes, suggesting that IQ is a significant predictor of language exam performance regardless of class size.
 •	There is a positive correlation between IQ and language exam scores, and socio-economic status also plays a role in this relationship.
+
