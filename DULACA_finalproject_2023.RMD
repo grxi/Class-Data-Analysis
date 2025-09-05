@@ -1,0 +1,436 @@
+---
+title: ANLYTC3 Finals Project
+author: Dulaca, Joanna Grace P.
+output: html_document
+---
+
+The data set `nlschools` (in the `MASS` library, use `data(nlschools, package = "MASS")` to load in the data) contains the following records for 2287 students in the Netherlands (see `?nlschools` for more information) 
+
+* `lang`: their test score on a language exam
+* `IQ`: their verbal IQ
+* `class`: the ID number for their classroom
+* `GS`: the number of students in each class
+* `SES`: the socio-economic status of their family
+* `COMB`: was the student in a multi-grade class? (0=no, 1=yes)
+
+
+
+#### Introduction
+
+Academic performance is influenced by a myriad of factors ranging from socio-economic status (SES) to classroom dynamics and individual cognitive abilities. In this analysis, I explore the intricate web of factors that impact educational outcomes and language exam performance among students in the Netherlands. My goal is to untangle this complexity and identify targeted interventions that can ensure equitable access to quality education for all students.
+
+Firstly, I investigated the impact of class size on academic performance, revealing intriguing trends where both average IQ and test scores tend to decline as class size increases, with notable peaks at specific class sizes. Additionally, I created a plot to show the relationship between class type (multi-grade vs. non-multi-grade) and academic performance, finding that non-multi-grade classes often exhibit higher average IQ and SES compared to multi-grade classes. However, variations in class size and type did not significantly impact the distribution of IQ scores, suggesting a complex interplay of factors.
+
+Moving forward, I explore the influence of individual cognitive abilities, particularly IQ, on academic performance. The findings highlight a positive correlation between IQ and language exam scores, indicating that students with higher IQ tend to perform better on the language exam. Moreover, I uncover interesting interactions among variables, such as the differing impact of SES between class types and the nuanced relationship between IQ, SES, and language exam scores.
+
+To start the first findings underscore the complexity of factors influencing educational outcomes, including class, class size, class type (multi-grade vs. non-multi-grade), and socio-economic background: 
+
+
+1. Are there descrepancies in `IQ` or `SES` in the different classes, or when grouping by multi-grade vs non-multi-grade classes?
+
+
+a. Average IQ and Test Scores by Class Size: This analysis aims to explore potential differences in IQ and test scores across different class sizes.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Load necessary libraries
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(reshape2)
+library(splines)
+library(knitr)
+library(binom)
+library(scales)
+library(MASS)
+
+
+# Load dataset
+data(nlschools, package = 'MASS')
+
+
+# Determine the number of test items
+test.items = length(nlschools$lang)
+
+# Determine the number of IQ items
+iq.items = length(nlschools$IQ)
+
+# Group data by class size (GS) and calculate average test scores and IQ scores
+sum.gs = ddply(nlschools, "GS", summarize, 
+               avg.test = sum(lang)/test.items*100 , 
+               avg.iq = sum(IQ)/iq.items*100)
+
+# Arrange the data by class size in descending order
+sum.gs = arrange(sum.gs, desc(GS))
+
+# Create a line plot to visualize the relationship between class size and average IQ and test results
+ggplot(data = sum.gs) + 
+  geom_line(aes(x=GS, y=avg.iq, color="Average IQ")) + 
+  geom_line(aes(x=GS, y=avg.test, color="Average Test Results")) + 
+  scale_color_manual("", values=c("Average IQ"="coral1","Average Test Results"="darkseagreen")) + 
+  labs(title = 'Average IQ and Test Scores by Class Size', 
+       x = 'Class size', 
+       y = 'Average')
+```
+
+As class size increases, both average IQ and test scores tend to decline, with notable peaks at specific class sizes. Based on the plot, the suggested class size is around 25 to not less than 35.
+
+
+b. IQ by Class and Class size: This analysis aims to investigate the relationship between class and class size and students' IQ scores.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Create a density plot to visualize the distribution of IQ by class
+ggplot(data=nlschools, mapping=aes(x = IQ, fill = class)) +
+  geom_density() +
+  labs(title = "IQ by Class",
+       x = "IQ",
+       y = "Density",
+       fill = "Class")
+```
+
+Most classes exhibit a peak around an IQ score of 10. This suggests that a significant number of students in each class have IQ scores clustered around this value. Meanwhile, few classes have outliers with higher IQ scores (e.g., above 16). 
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Define a function to perform cross-validation for different degrees of freedom (DF) in natural splines
+cross_validate_glm <- function(data, formula.text, DF.vector, K=10) {
+  require(boot) 
+  cv.scores <- rep(0, times = length(DF.vector))
+  for (DF in DF.vector) {
+    spline.model <- glm(as.formula(formula.text), data = data)
+    # Run K-fold cross-validation 
+    cv <- cv.glm(data = data, glmfit = spline.model, K=K)
+    cv.scores[DF] <- cv$delta[1]
+  }
+  
+  data.out <- data.frame(df = DF.vector, cv.scores = cv.scores)
+  cv.plot <- ggplot(data = data.out, mapping = aes(x=df, y=cv.scores)) + geom_point() + 
+    labs(x='df', title='Cross-Validation Scores') + theme(plot.title = element_text(hjust = 0.5))
+  return(list(scores = cv.scores, plot = cv.plot))
+}  
+
+# Perform cross-validation for IQ by class size using natural splines with degrees of freedom from 1 to 10
+iq_by_class_size_cv <- cross_validate_glm(data = nlschools, formula.text = 'IQ ~ ns(GS, df=DF)', DF.vector = 1:10)
+
+
+# Plot IQ by class size with a line geom_smooth()
+(IQ_by_class_size <- ggplot(data = nlschools, mapping = aes(x=GS, y=IQ)) + # Add a linear regression line
+  geom_point() + geom_smooth(method = 'lm', formula = y ~ ns(x, df = 5)) +
+  labs(x='Class Size', title = 'IQ vs. Class Size') + 
+  theme(plot.title = element_text(hjust = 0.5)))
+```
+
+The scatter plot shows little to no correlation between class size and students’ IQ scores, as indicated by the line amidst scattered data points.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Define a function to find QQ data for IQ
+find_qq <- function(.data, col_name, pooled_data) {
+  num_points <- min(length(.data[, col_name]), length(pooled_data))
+  probs <- seq(from = 0, to = 1, length.out = num_points)
+  q1 <- quantile(.data[, col_name], probs = probs)
+  q2 <- quantile(pooled_data, probs = probs)
+  return(data.frame(Individual_Group_Data = q1, Overall_Data = q2, quantile = probs))
+}
+
+# Calculate QQ data for IQ by class size
+qq_iq_df <- ddply(nlschools, .(GS), find_qq, col_name = 'IQ', pooled_data = nlschools$IQ)
+
+# Plot QQ plot for IQ by class size
+ggplot(data = qq_iq_df, mapping = aes(x=Overall_Data, y=Individual_Group_Data)) + geom_point() + geom_abline() + 
+  facet_wrap('GS', nrow = 4) + 
+  labs(title = 'IQ by Class Size') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The QQ plot demonstrates that IQ scores across different class sizes closely follow a normal distribution, as indicated by the alignment of data points with the diagonal line. Similar to scatterplot, this suggests that variations in class size do not significantly impact the distribution of IQ scores.
+
+       
+c. IQ by Multigrade Class Type: This analysis aims to explore the distribution of IQ scores within multigrade classes
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Count the occurrences of class types
+class_counts <- table(nlschools$COMB)
+
+# Calculate the percentages of each class type
+percentages <- round(prop.table(class_counts) * 100, 2)
+
+# Create labels for the pie chart
+labels <- ifelse(names(class_counts) == "0", "Non-multigrade", "Multigrade")
+labels <- paste(labels, "\n", percentages, "%", sep = "")
+
+# Define colors for the pie chart
+colors <- c("skyblue", "salmon")
+
+# Create a pie chart to visualize the distribution of class types and their average IQ scores
+pie(class_counts, labels = labels, main = "Average IQ of Non-multigrade and Multigrade Classes", col = colors)
+```
+
+Non-multigrade classes have a higher average IQ compared to multigrade classes. Non-multigrade classes offer targeted curriculum tailored to specific grade levels, fostering consistent learning environments among peers of the same age. This focused approach may enhance cognitive development. Conversely, multigrade classes combine students from different grades, posing challenges for teachers in balancing diverse learning needs. Interaction dynamics vary as younger students may look up to older peers, potentially fostering mentorship roles. 
+
+```{r}
+# Calculate the average SES for multi-grade and non-multi-grade classes
+avg_ses <- aggregate(SES ~ COMB, data = nlschools, FUN = mean)
+
+# Create labels for the pie chart
+labels <- ifelse(avg_ses$COMB == 1, "Multigrade", "Non-multigrade")
+labels <- paste(labels, "\n", round(avg_ses$SES, 2), sep = "")
+
+# Define colors for the pie chart
+colors <- c("skyblue", "salmon")
+
+# Create a pie chart to visualize the distribution of average SES by multi-grade class type
+pie(avg_ses$SES, labels = labels, main = "Average SES by Multi-Grade Class Type", col = colors)
+```
+
+These averages suggests that, on average, students in non-multigrade classes tend to have slightly higher socio-economic status (SES) compared to those in multigrade classes. Students in non-multigrade classes tend to come from families with slightly higher socio-economic backgrounds. Meanwhile, multigrade classes include students from families with slightly lower socio-economic status on average. Schools and the government can use this information to tailor support and resources based on the specific needs of each class type.
+
+d. Socio-Economic Status by Class and Class Size: This aims to explore whether there are differences in socio-economic status based on class and class size-- whether students in larger or smaller classes tend to have different SES.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Visualize SES distributions by class
+ggplot(data = nlschools, mapping = aes(x = SES, fill = class)) +
+  geom_density() +  # Plot density curves for SES by class
+  labs(title = "SES by Class",
+       x = "SES",
+       y = "Density",
+       fill = "Class")
+```
+
+Different classes exhibit varying SES distributions. Some classes have higher concentrations around specific SES values, while others are more evenly spread. The peak around an SES of 10 suggests that many students fall into this category across different classes.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Calculate QQ plots for SES within each class size group
+QQ_SES_df <- ddply(nlschools, .(GS), find_qq, col_name = 'SES', pooled_data = nlschools$SES)
+
+# Create a scatter plot with QQ lines
+ggplot(data = QQ_SES_df, mapping = aes(x=Overall_Data, y=Individual_Group_Data)) + geom_point() + geom_abline() + 
+  # Separate plots by class size
+  facet_wrap('GS', nrow = 4) + 
+  labs(title = 'Comparison of SES Distribution Across Class Sizes') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+As SES increases, the overall SES tends to increase within individual class sizes. However, there are variations in data density and distribution. 
+
+e. Correlation between IQ and SES: This aims to represent the correlation coefficient between IQ and SES. 
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Extracting IQ and SES values from nlschools
+iq_values <- nlschools$IQ
+ses_values <- nlschools$SES
+
+# Calculate the overall correlation
+correlation <- cor(iq_values, ses_values)
+
+# Create a bar graph
+barplot(correlation, names.arg = "Correlation", ylim = c(-1, 1),
+        main = "Correlation between IQ and SES",
+        xlab = "Variables", ylab = "Correlation Coefficient")
+```
+
+The result shows a positive correlation, indicating that as SES increases, IQ tends to increase as well.
+
+
+
+*The analysis investigated potential disparities in IQ and socio-economic status (SES) across various class, class sizes, and class types (multi-grade vs. non-multi-grade) among students in the Netherlands. The findings above underscore the importance of considering what class they are in and the class size and class type in educational policy and practice, with implications for curriculum design, teacher training, and resource allocation.*
+
+
+Next, the analyses conducted below provide valuable insights into the factors influencing students' performance on the language exam in the Netherlands:
+
+2. When did students perform better or worse on the language exam? Describe which variables had the most important effects. 
+
+a. Socio-Economic Status vs. Language Test Score: This aims to investigate the relationship between students' socio-economic status (SES) and their language test scores. It explores whether students from higher SES backgrounds tend to perform better on the language exam compared to students from lower SES backgrounds.
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Create a scatter plot for SES and Language Test Score
+ggplot(data = nlschools, mapping = aes(x = SES, y = lang)) +
+  geom_point() +  
+  geom_smooth(method = 'lm', formula = y ~ ns(x, df = 5)) +  # Add a linear regression line
+  labs(x = 'Socio-Economic Status', y = 'Language Test Score',
+       title = 'Socio-Economic Status vs. Language Test Score') +  # Set axis labels and plot title
+  theme(plot.title = element_text(hjust = 0.5))  # Center the plot title
+```
+
+As SES increases, the language test score tends to increase as well. Some students with lower SES still achieve high language test scores, and vice versa.
+
+
+b. Impact of Class Type on Language Test Scores: This examines how language test scores vary between multi-grade and non-multi-grade classes.
+
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Convert 'COMB' variable to factor with appropriate labels
+nlschools$COMB <- factor(nlschools$COMB, labels = c("Non-multigrade", "Multigrade"))
+
+# Calculate the mean language test score for each class type
+count <- ddply(nlschools, "COMB", summarize, ave = mean(lang))
+
+# Create the bar plot
+ggplot(count, aes(x = COMB, y = ave, fill = COMB)) + 
+  # Plot bars using identity statistics
+  geom_bar(stat = "identity") +  
+  labs(x = 'Class Type', y = 'Average Language Test Score', 
+       title = 'Impact of Class Type on Language Test Scores') +  # Set axis labels and plot title
+  theme(plot.title = element_text(hjust = 0.5))  # Center the plot title
+```
+
+The multigrade class has a little higher average language test score compared to the non-multigrade class. There may be differences in the effectiveness of instructional approaches or peer interactions between the two class types, with non-multi-grade classes potentially offering advantages in terms of language test performance. 
+
+
+c. Impact of Class Size on Language Test Scores: This explores the relationship between class size and language test scores. 
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Create a scatter plot to visualize the relationship between class size and language test scores 
+ggplot(data = nlschools, mapping = aes(x = GS, y = lang)) + 
+  geom_point() +
+  # Add a linear regression line
+  geom_smooth(method = 'lm') +
+  labs(x = 'Class Size', y = 'Language Test Score', 
+       title = 'Language Test Score vs. Class Size') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+The line remains relatively flat, indicating that the average test score does not significantly change with class size. Class size alone does not appear to strongly influence test performance.
+
+d. IQ vs Language Test Score: This assesses the correlation between students' IQ and their language test scores. 
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Create a scatter plot to visualize the relationship between IQ and language test scores
+ggplot(data = nlschools, mapping = aes(x = IQ, y = lang)) + 
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  labs(x = 'IQ', y = 'Language Test Score', 
+       title = 'IQ vs Language Test Score') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The line represents a positive correlation between IQ and language test scores. As IQ increases, the language test score tends to increase as well. Students with higher IQ scores tend to perform better on language tests.
+
+*Overall, students generally perform better on the language exam when their socio-economic status (SES) is higher and when their IQ is higher. Higher SES often correlates with access to resources such as quality education, books, and extracurricular activities, which can enhance language skills and cognitive development. Furthermore, higher IQ levels may indicate stronger cognitive abilities, including language processing, comprehension, and problem-solving skills, all of which are essential for success in language exams.*
+
+
+Finally, the last analyses conducted reveal intriguing interactions in the effects of various variables on language exam scores:
+
+3. Do you think there are interactions in the effects of the variables on the language exam score? Speculate as to the cause of any such effects that you think should be included.
+
+a. Interaction between SES and Class Type on Language Test Scores
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+library(ggplot2)
+
+# Split the data by class type
+non_multigrade_data <- subset(nlschools, COMB == "Non-multigrade")
+multigrade_data <- subset(nlschools, COMB == "Multigrade")
+
+# Fit linear models for each class type
+lm_non_multigrade <- lm(lang ~ SES, data = non_multigrade_data)
+lm_multigrade <- lm(lang ~ SES, data = multigrade_data)
+
+# Predict language test scores for a range of SES values
+SES_range <- seq(min(nlschools$SES), max(nlschools$SES), length.out = 100)
+predictions_non_multigrade <- predict(lm_non_multigrade, newdata = data.frame(SES = SES_range))
+predictions_multigrade <- predict(lm_multigrade, newdata = data.frame(SES = SES_range))
+
+# Plot the scatter plot and regression lines
+ggplot(data = nlschools, aes(x = SES, y = lang, color = COMB)) +
+  geom_point() +
+  geom_line(data = data.frame(SES = SES_range, lang = predictions_non_multigrade, COMB = "Non-multigrade"), aes(x = SES, y = lang), linetype = "dashed") +
+  geom_line(data = data.frame(SES = SES_range, lang = predictions_multigrade, COMB = "Multigrade"), aes(x = SES, y = lang), linetype = "dashed") +
+  labs(x = 'Socio-Economic Status', y = 'Language Test Score',
+       title = 'Interaction between SES and Class Type on Language Test Scores') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+ 
+ The non-multigrade line has a steeper incline, indicating a stronger positive correlation between SES and language test scores in non-multigrade classes. Meanwhile, multigrade line has a gentler slope, suggesting a less pronounced correlation between SES and test scores in multigrade classes. Overall, as SES increases, language test scores tend to improve. However, the impact of SES differs between class types: In non-multigrade classes, higher SES is associated with more significant improvements in test scores. In multigrade classes, the effect of SES on test scores is less pronounced.
+
+b. Interaction between Class Type and Class Size on Language Test Scores
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Load necessary libraries
+library(ggplot2)
+
+# Group data by both class type and class size, and calculate the mean language test score
+grouped_data <- aggregate(lang ~ COMB + GS, data = nlschools, FUN = mean)
+
+# Convert COMB to a factor for better visualization
+grouped_data$COMB <- factor(grouped_data$COMB, labels = c("Non-multigrade", "Multigrade"))
+
+# Create grouped bar plot
+ggplot(grouped_data, aes(x = factor(GS), y = lang, fill = COMB)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Class Size", y = "Average Language Test Score", 
+       title = "Interaction between Class Type and Class Size on Language Test Scores") +
+  scale_fill_manual(values = c("Non-multigrade" = "skyblue", "Multigrade" = "salmon")) +
+  theme_minimal()
+```
+
+Overall, non-multigrade classes tend to have slightly higher average test scores, but the variation is significant. While non-multigrade classes, on average, may have higher test scores, there are individual cases where students in multigrade classes perform exceptionally well, and vice versa. 
+
+c. Interaction between IQ and Class Size on Language Test Scores
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+# Split the data by class size
+small_class_data <- subset(nlschools, GS < 25)
+medium_class_data <- subset(nlschools, GS >= 25 & GS <= 35)
+large_class_data <- subset(nlschools, GS > 35)
+
+# Fit linear models for each class size
+lm_small_class <- lm(lang ~ IQ, data = small_class_data)
+lm_medium_class <- lm(lang ~ IQ, data = medium_class_data)
+lm_large_class <- lm(lang ~ IQ, data = large_class_data)
+
+# Predict language test scores for a range of IQ values
+IQ_range <- seq(min(nlschools$IQ), max(nlschools$IQ), length.out = 100)
+predictions_small_class <- predict(lm_small_class, newdata = data.frame(IQ = IQ_range))
+predictions_medium_class <- predict(lm_medium_class, newdata = data.frame(IQ = IQ_range))
+predictions_large_class <- predict(lm_large_class, newdata = data.frame(IQ = IQ_range))
+
+# Plot the scatter plot and regression lines
+ggplot(data = nlschools, aes(x = IQ, y = lang, color = factor(GS))) +
+  geom_point() +
+  geom_line(data = data.frame(IQ = IQ_range, lang = predictions_small_class, GS = "< 25"), aes(x = IQ, y = lang), linetype = "dashed") +
+  geom_line(data = data.frame(IQ = IQ_range, lang = predictions_medium_class, GS = "25-35"), aes(x = IQ, y = lang), linetype = "dashed") +
+  geom_line(data = data.frame(IQ = IQ_range, lang = predictions_large_class, GS = "> 35"), aes(x = IQ, y = lang), linetype = "dashed") +
+  labs(x = 'IQ', y = 'Language Test Score',
+       title = 'Interaction between IQ and Class Size on Language Test Scores') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+There is a positive trend between IQ and language test scores. As IQ increases, students tend to perform better on the language exam.
+However, the impact of class size on language test scores is not immediately noticeable.
+
+d. 
+
+```{r fig.width=8, fig.height=6, dpi=100, fig.align='center'}
+ggplot(nlschools, aes(x = IQ, y = lang, color = SES)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "coral1") +
+  labs(title = "Interaction between IQ and SES on Language Exam Scores",
+       x = "IQ",
+       y = "Language Exam Scores",
+       color = "SES") +
+  theme_minimal()
+```
+
+The line shows the positive correlation between IQ and language exam scores. As IQ increases, language exam scores tend to increase as well, and socio-economic status also play a role in this relationship. 
+
+*Yes, there are interactions between variables and language exam scores. These effects may be attributed to differences in teaching methods, resource allocation, and classroom dynamics across class types and sizes. For example, the varying slopes of regression lines suggest that socio-economic status (SES) has a stronger impact on language test scores in non-multigrade classes compared to multigrade classes. Additionally, differences in instructional approaches and peer interactions could influence how IQ relates to language exam scores across different class sizes and types.*
+
+
+#### Conclusion
+In this analysis, I explored factors influencing educational outcomes and language exam performance among students in the Netherlands. I found that class size and type play significant roles, with larger classes correlating with lower average IQ and test scores. Non-multi-grade classes generally exhibited higher IQ and SES compared to multi-grade classes. However, class size and type did not significantly impact the distribution of IQ scores. I also observed a positive correlation between IQ and language exam scores, with SES influencing this relationship differently across class types. Overall, these findings highlight the need for targeted interventions to address disparities and ensure equitable access to quality education for all students. Below is the summary of findings:
+
+1.	IQ and SES Analysis:
+•	Class size appears to have an inverse relationship with both average IQ and test scores, with peaks noted at certain class sizes.
+•	Multigrade classes tend to have slightly lower average IQ compared to non-multigrade classes.
+•	Non-multigrade classes have higher average SES compared to multigrade classes.
+•	There is little to no correlation between class size and students' IQ scores.
+•	IQ scores across different class sizes closely follow a normal distribution, suggesting minimal impact of class size on IQ scores.
+
+2.	Language Exam Performance Analysis:
+•	Language test scores tend to increase with higher SES.
+•	Multigrade classes show a slightly higher average language test score compared to non-multigrade classes.
+•	There is little to no significant impact of class size on language test scores.
+•	There is a positive correlation between IQ and language test scores, indicating that higher IQ tends to result in better language exam performance.
+
+3.	Interactions between Variables and Language Exam Scores:
+•	Non-multigrade classes exhibit a stronger positive correlation between SES and language test scores compared to multigrade classes.
+• While non-multigrade classes tend to have slightly higher average test scores, there are individual cases where students in multigrade classes perform exceptionally well, and vice versa.
+•	There is a positive trend between IQ and language test scores across different class sizes, suggesting that IQ is a significant predictor of language exam performance regardless of class size.
+•	There is a positive correlation between IQ and language exam scores, and socio-economic status also plays a role in this relationship.
